@@ -1,0 +1,30 @@
+;; Copyright (c) Cognitect, Inc. All rights reserved.
+
+{:paths ["src"]
+ :deps {com.cognitect.aws/api {:mvn/version "0.8.391"
+                               :exclusions [org.slf4j/slf4j-log4j12]}
+        com.cognitect.aws/dynamodb {:mvn/version "825.2.1262.0"}
+        com.cognitect.aws/ec2 {:mvn/version "836.2.1323.0"}
+        com.cognitect.aws/endpoints {:mvn/version "1.1.12.415"}
+        com.cognitect.aws/logs {:mvn/version "835.2.1307.0"}
+        com.cognitect.aws/codebuild {:mvn/version "821.2.1107.0"}
+        com.cognitect.aws/autoscaling
+        {:mvn/version "836.2.1323.0", :aws/serviceFullName "Auto Scaling"}
+        com.cognitect.aws/cloudformation {:mvn/version "835.2.1307.0"} 
+        com.cognitect.aws/s3 {:mvn/version "825.2.1250.0"}
+        com.cognitect.aws/iam
+        {:mvn/version "835.2.1307.0",
+         :aws/serviceFullName "AWS Identity and Access Management"}
+        com.cognitect.aws/resourcegroupstaggingapi {:mvn/version "822.2.1109.0"}
+        com.cognitect.aws/states
+        {:mvn/version "825.2.1266.0",
+         :aws/serviceFullName "AWS Step Functions"}
+        com.cognitect.aws/elasticfilesystem
+        {:mvn/version "836.2.1323.0",
+         :aws/serviceFullName "Amazon Elastic File System"}
+        com.cognitect.aws/elasticloadbalancing
+        {:mvn/version "821.2.1107.0",
+         :aws/serviceFullName "Elastic Load Balancing"},
+        ;; N.B. requires a preview release of data.xml
+        org.clojure/data.json {:mvn/version "2.4.0"}}}
+
