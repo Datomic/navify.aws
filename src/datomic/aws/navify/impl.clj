@@ -33,7 +33,6 @@ Subject to change."}
               :resource maybe-resource}
              {:resource resource-or-type}))))
 
-
 (defn with-nav
   "Add nav-fn as nav to x."
   [x nav-fn]
@@ -54,10 +53,13 @@ Subject to change."}
   "Returns string arn for a parsed arn.
   delim may need to be : or / depending on resource.
   See https://docs.aws.amazon.com/IAM/latest/UserGuide/reference-arns.html"
-  [{:keys [partition service region account resource resource-type]} delim]
-  (format "arn:%s:%s:%s:%s:%s%s%s"
-          partition service region account  resource-type delim resource))
-
+  [{:keys [partition service region account resource resource-type]
+    :or {partition "" service "" account "" region "" resource ""}} delim]
+  (if resource-type
+    (format "arn:%s:%s:%s:%s:%s%s%s"
+            partition service region account resource-type delim resource)
+    (format "arn:%s:%s:%s:%s:%s"
+            partition service region account resource)))
 
 (defmulti describe-args-by-resource-type
   "Helper for describe args for services that have a categoric
@@ -65,6 +67,11 @@ Subject to change."}
   (fn [{:keys [service resource-type]}] [service resource-type]))
 
 (defmethod describe-args-by-resource-type :default [_] nil)
+
+(defmethod describe-args-by-resource-type  ["sns" nil]
+  [parsed-arn]
+  {:op :GetTopicAttributes
+   :request {:TopicArn (resource-type-arn parsed-arn ":")}})
 
 (defmethod describe-args-by-resource-type  ["ec2" "instance"]
   [{:keys [resource]}]
@@ -75,6 +82,16 @@ Subject to change."}
   [{:keys [resource]}]
   {:op :DescribeSubnets
    :request {:SubnetIds [resource]}})
+
+(defmethod describe-args-by-resource-type  ["ec2" "vpc"]
+  [{:keys [resource]}]
+  {:op :DescribeVpcs
+   :request {:VpcIds [resource]}})
+
+(defmethod describe-args-by-resource-type  ["ec2" "internet-gateway"]
+  [{:keys [resource]}]
+  {:op :DescribeInternetGateways
+   :request {:InternetGatewayIds [resource]}})
 
 (defmethod describe-args-by-resource-type  ["ec2" "security-group"]
   [{:keys [resource]}]
@@ -90,6 +107,17 @@ Subject to change."}
   [{:keys [resource]}]
   {:op :BatchGetBuilds
    :request {:ids [resource]}})
+
+;; does not handle aliases and versions yet
+(defmethod describe-args-by-resource-type  ["lambda" "function"]
+  [{:keys [resource]}]
+  {:op :GetFunction
+   :request {:FunctionName resource}})
+
+(defmethod describe-args-by-resource-type  ["elasticloadbalancing" "loadbalancer"]
+  [{:keys [resource]}]
+  {:op :DescribeLoadBalancers
+   :request {:LoadBalancerNames [resource]}})
 
 (defmethod describe-args-by-resource-type  ["cloudformation" "stack"]
   [parsed-arn]
@@ -107,10 +135,51 @@ Subject to change."}
   {:op :GetRole
    :request {:RoleName resource}})
 
+;; v1 arn:${Partition}:elasticloadbalancing:${Region}:${Account}:loadbalancer/${LoadBalancerName}	
+;; app arn:${Partition}:elasticloadbalancing:${Region}:${Account}:loadbalancer/app/${LoadBalancerName}/${LoadBalancerId)
+;; net arn:${Partition}:elasticloadbalancing:${Region}:${Account}:loadbalancer/net/${LoadBalancerName}/${LoadBalancerId}
 (defmethod describe-args-by-resource-type  ["elasticloadbalancing" "loadbalancer"]
-  [{:keys [resource]}]
-  {:op :DescribeLoadBalancers
-   :request {:LoadBalancerNames [resource]}})
+  [{:keys [resource] :as parsed-arn}]
+  (if
+    (or (str/starts-with? resource "app/")
+        (str/starts-with? resource "net/"))
+    {:op :DescribeLoadBalancers
+     :request {:LoadBalancerArns [(resource-type-arn parsed-arn "/")]}}
+    {:op :DescribeLoadBalancers
+     :request {:LoadBalancerNames [resource]}}))
+
+(defmethod describe-args-by-resource-type  ["elasticloadbalancing" "targetgroup"]
+  [{:keys [resource] :as parsed-arn}]
+  {:op :DescribeTargetGroups
+   :request {:TargetGroupArns [(resource-type-arn parsed-arn "/")]}})
+
+(defmulti describe-api-gateway-args
+  "API Gateway resource types are /-delimited inside the resource string."
+  (fn [parsed-arn [e1 _ e3 :as elems]] [e1 e3 (count elems)]))
+
+(defmethod describe-api-gateway-args :default [_ _] nil)
+
+(defmethod describe-api-gateway-args ["apis" nil 2]
+  [_ [_ api-id]]
+  {:op :GetApi
+   :request {:ApiId api-id}})
+
+(defmethod describe-api-gateway-args ["apis" "stages" 4]
+  [_ [_ api-id _ stage-name]]
+  {:op :GetStage
+   :request {:ApiId api-id :StageName stage-name}})
+
+(defmethod describe-api-gateway-args ["vpclinks" nil 2]
+  [_ [_ vpc-link-id]]
+  {:op :GetVpcLink
+   :request {:VpcLinkId vpc-link-id}})
+
+;; apigateway has an empty resource type string and
+;; multiple resource types delimited by slashes in the resource value
+;; https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonapigatewaymanagementv2.html
+(defmethod describe-args-by-resource-type  ["apigateway" ""]
+  [{:keys [resource] :as parsed-arn}]
+  (describe-api-gateway-args parsed-arn (str/split resource #"/")))
 
 (defmulti describe-args
   "Given a parsed arn, return the args to make an AWS API call to describe
@@ -135,6 +204,20 @@ Subject to change."}
 (defmulti client
   "Returns an AWS API client for parsed arn."
   :service)
+
+;; Some services have different client versions for the same resource-type.
+(defmethod client "elasticloadbalancing"
+  [{:keys [resource-type resource]}]
+  (if (and (= resource-type "loadbalancer")
+           (not (or (str/starts-with? resource "app/")
+                    (str/starts-with? resource "net/"))))
+    (aws/client {:api :elasticloadbalancing})
+    (aws/client {:api :elasticloadbalancingv2})))
+
+;; Some service client names do not match the ARN service key.
+(defmethod client "apigateway"
+  [{:keys [resource-type resource]}]
+  (aws/client {:api :apigatewayv2}))
 
 (defmethod client :default
   [{:keys [service]}]
